@@ -139,7 +139,7 @@ int main(int argc, char** argv)
     cl_context context;                 // compute context
     cl_command_queue commands;          // compute command queue
     cl_program program;                 // compute program
-    cl_kernel kernel;                   // compute kernel
+    //cl_kernel kernel;                   // compute kernel
     
     cl_mem input;                       // device memory used for the input array
     cl_mem output;                      // device memory used for the output array
@@ -179,7 +179,7 @@ int main(int argc, char** argv)
   //  mat[i][j]=1.0;
 
   for (int i=0;i<nchan;i++) {
-    mat[i][ndata/2+150+(int)(0.43*i+0.0)]=0.0;
+    mat[i][ndata/2+150+(int)(0.43*i+0.0)]=1.0;
     //mat[i][ndata/2+150]=1;
   }
   unsigned int count = DATA_SIZE;
@@ -251,15 +251,15 @@ int main(int argc, char** argv)
     //kernel = clCreateKernel(program, "square", &err);
 
     //kernel = clCreateKernel(program, "dedisperse_1pass", &err);
-    kernel = clCreateKernel(program, "dedisperse_kernel_3pass", &err);
+    cl_kernel kernel3 = clCreateKernel(program, "dedisperse_kernel_3pass", &err);
 
-    if (!kernel || err != CL_SUCCESS)
+    if (!kernel3 || err != CL_SUCCESS)
     {
         printf("Error: Failed to create compute kernel!\n");
         exit(1);
     }
-    cl_kernel kernel2 = clCreateKernel(program, "dedisperse_kernel_3pass", &err);
-    cl_kernel kernel3 = clCreateKernel(program, "dedisperse_kernel_3pass", &err);
+    cl_kernel kernel2 = clCreateKernel(program, "dedisperse_kernel_2pass", &err);
+    cl_kernel kernel1 = clCreateKernel(program, "dedisperse_1pass", &err);
     if (!kernel2 || err != CL_SUCCESS)
     {
         printf("Error: Failed to create compute kernel2!\n");
@@ -269,8 +269,13 @@ int main(int argc, char** argv)
 
     // Create the input and output arrays in device memory for our calculation
     //
-    input = clCreateBuffer(context,  CL_MEM_READ_ONLY,  sizeof(float) * count, NULL, NULL);
-    output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * count, NULL, NULL);
+    //input = clCreateBuffer(context,  CL_MEM_READ_ONLY,  sizeof(float) * count, NULL, NULL);
+    //output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * count, NULL, NULL);
+
+    input = clCreateBuffer(context,  CL_MEM_READ_WRITE,  sizeof(float) * count, NULL, NULL);
+    output = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * count, NULL, NULL);
+
+
     if (!input || !output)
     {
         printf("Error: Failed to allocate device memory!\n");
@@ -289,12 +294,12 @@ int main(int argc, char** argv)
     // Set the arguments to our compute kernel
     //
     err = 0;
-    err  = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
-    err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
-    err |= clSetKernelArg(kernel, 2, sizeof(unsigned int), &nchan);
-    err |= clSetKernelArg(kernel, 3, sizeof(unsigned int), &ndata);
+    err  = clSetKernelArg(kernel1, 0, sizeof(cl_mem), &input);
+    err |= clSetKernelArg(kernel1, 1, sizeof(cl_mem), &output);
+    err |= clSetKernelArg(kernel1, 2, sizeof(unsigned int), &nchan);
+    err |= clSetKernelArg(kernel1, 3, sizeof(unsigned int), &ndata);
     int curchan=nchan;
-    err |= clSetKernelArg(kernel, 4, sizeof(unsigned int), &curchan);
+    err |= clSetKernelArg(kernel1, 4, sizeof(unsigned int), &curchan);
 
     if (err != CL_SUCCESS)
     {
@@ -328,18 +333,12 @@ int main(int argc, char** argv)
 
     // Get the maximum work group size for executing the kernel on the device
     //
-    err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
+    err = clGetKernelWorkGroupInfo(kernel1, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
+    err = err|clGetKernelWorkGroupInfo(kernel2, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
+    err = err|clGetKernelWorkGroupInfo(kernel3, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
     if (err != CL_SUCCESS)
-    {
+      {
         printf("Error: Failed to retrieve kernel work group info! %d\n", err);
-        exit(1);
-    }
-
-    err = clGetKernelWorkGroupInfo(kernel2, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
-    err = clGetKernelWorkGroupInfo(kernel3, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
-    if (err != CL_SUCCESS)
-    {
-        printf("Error: Failed to retrieve kernel2 work group info! %d\n", err);
         exit(1);
     }
 
@@ -349,45 +348,54 @@ int main(int argc, char** argv)
     //global = count;
     //local = 256;
     local = THREADS_PER_BLOCK;
-    global = nchan/8*local;
+    //global = nchan/8*local;
     //printf("global is %d\n",global);
     
     double t1=omp_get_wtime();
 
-    for (int i=0;i<50*depth;i++) {
-      for (int i=0;i<1;i++) {
-	err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
-	if (err) {
-	  printf("Error: Failed to execute kernel!\n");
-	  return EXIT_FAILURE;
-	}
-	
-#if 0
-	err = clEnqueueNDRangeKernel(commands, kernel2, 1, NULL, &global, &local, 0, NULL, NULL);
-	if (err) {
-	  printf("Error: Failed to execute kernel2!\n");
-	  return EXIT_FAILURE;
-	}
-	
+    curchan=nchan;
+    while (curchan>1) {
+      if (curchan>4) {
+	printf("doing 3pass\n");
+	global=nchan/8*local;
+	clSetKernelArg(kernel3, 4, sizeof(unsigned int), &curchan);
+	clSetKernelArg(kernel3, 0, sizeof(cl_mem), &input);
+	clSetKernelArg(kernel3, 1, sizeof(cl_mem), &output);
 	err = clEnqueueNDRangeKernel(commands, kernel3, 1, NULL, &global, &local, 0, NULL, NULL);
-	if (err) {
-	  printf("Error: Failed to execute kernel3!\n");
-	  return EXIT_FAILURE;
+	curchan/=8;
       }
-#endif
+      else if (curchan>2) {
+	printf("doing 2pass\n");
+	global=nchan/4*local;
+	clSetKernelArg(kernel2, 4, sizeof(unsigned int), &curchan);
+	clSetKernelArg(kernel2, 0, sizeof(cl_mem), &input);
+	clSetKernelArg(kernel2, 1, sizeof(cl_mem), &output);
+	err = clEnqueueNDRangeKernel(commands, kernel2, 1, NULL, &global, &local, 0, NULL, NULL);
+	curchan/=4;
       }
+      else {
+	printf("doing 1pass\n");
+	global=nchan/2*local;
+	clSetKernelArg(kernel1, 4, sizeof(unsigned int), &curchan);
+	clSetKernelArg(kernel1, 0, sizeof(cl_mem), &input);
+	clSetKernelArg(kernel1, 1, sizeof(cl_mem), &output);
+	err = clEnqueueNDRangeKernel(commands, kernel2, 1, NULL, &global, &local, 0, NULL, NULL);
+	curchan/=2;	
+      }
+      cl_mem tmp=input;
+      input=output;
+      output=tmp;
+      
     }
-    // Wait for the command commands to get serviced before reading back results
-    //
-
-
+    
     clFinish(commands);
     double t2=omp_get_wtime();
     printf("kernel took %12.6f seconds.\n",t2-t1);
 
     // Read back the results from the device to verify the output
     //
-    err = clEnqueueReadBuffer( commands, output, CL_TRUE, 0, sizeof(float) * count, results, 0, NULL, NULL );  
+    //err = clEnqueueReadBuffer( commands, output, CL_TRUE, 0, sizeof(float) * count, results, 0, NULL, NULL );  
+    err = clEnqueueReadBuffer( commands, input, CL_TRUE, 0, sizeof(float) * count, results, 0, NULL, NULL );  
     if (err != CL_SUCCESS)
     {
         printf("Error: Failed to read output array! %d\n", err);
@@ -404,7 +412,7 @@ int main(int argc, char** argv)
     }
 
 
-#if 0
+#if 1
     FILE *outfile=fopen("test_out_2pass.dat","w");
     fwrite(&ndata,1,sizeof(int),outfile);
     fwrite(&nchan,1,sizeof(int),outfile);
@@ -430,7 +438,10 @@ int main(int argc, char** argv)
     clReleaseMemObject(input);
     clReleaseMemObject(output);
     clReleaseProgram(program);
-    clReleaseKernel(kernel);
+    //clReleaseKernel(kernel);
+    clReleaseKernel(kernel1);
+    clReleaseKernel(kernel2);
+    clReleaseKernel(kernel3);
     clReleaseCommandQueue(commands);
     clReleaseContext(context);
 
