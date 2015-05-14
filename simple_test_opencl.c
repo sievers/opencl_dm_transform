@@ -291,6 +291,14 @@ int main(int argc, char** argv)
         exit(1);
     }
 
+    err = clEnqueueWriteBuffer(commands, output, CL_TRUE, 0, sizeof(float) * count, data, 0, NULL, NULL);
+    if (err != CL_SUCCESS)
+    {
+        printf("Error: Failed to write to target array!\n");
+        exit(1);
+    }
+
+
     // Set the arguments to our compute kernel
     //
     err = 0;
@@ -353,39 +361,42 @@ int main(int argc, char** argv)
     
     double t1=omp_get_wtime();
 
-    curchan=nchan;
-    while (curchan>1) {
-      if (curchan>4) {
-	printf("doing 3pass\n");
-	global=nchan/8*local;
-	clSetKernelArg(kernel3, 4, sizeof(unsigned int), &curchan);
-	clSetKernelArg(kernel3, 0, sizeof(cl_mem), &input);
-	clSetKernelArg(kernel3, 1, sizeof(cl_mem), &output);
-	err = clEnqueueNDRangeKernel(commands, kernel3, 1, NULL, &global, &local, 0, NULL, NULL);
-	curchan/=8;
-      }
-      else if (curchan>2) {
-	printf("doing 2pass\n");
-	global=nchan/4*local;
-	clSetKernelArg(kernel2, 4, sizeof(unsigned int), &curchan);
-	clSetKernelArg(kernel2, 0, sizeof(cl_mem), &input);
-	clSetKernelArg(kernel2, 1, sizeof(cl_mem), &output);
-	err = clEnqueueNDRangeKernel(commands, kernel2, 1, NULL, &global, &local, 0, NULL, NULL);
-	curchan/=4;
-      }
-      else {
-	printf("doing 1pass\n");
-	global=nchan/2*local;
-	clSetKernelArg(kernel1, 4, sizeof(unsigned int), &curchan);
-	clSetKernelArg(kernel1, 0, sizeof(cl_mem), &input);
-	clSetKernelArg(kernel1, 1, sizeof(cl_mem), &output);
-	err = clEnqueueNDRangeKernel(commands, kernel2, 1, NULL, &global, &local, 0, NULL, NULL);
-	curchan/=2;	
-      }
-      cl_mem tmp=input;
-      input=output;
-      output=tmp;
+    for (int i=0;i<1;i++) {
       
+      curchan=nchan;
+      while (curchan>1) {
+	if (curchan>4) {
+	  //printf("doing 3pass\n");
+	  global=nchan/8*local;
+	  clSetKernelArg(kernel3, 4, sizeof(unsigned int), &curchan);
+	  clSetKernelArg(kernel3, 0, sizeof(cl_mem), &input);
+	  clSetKernelArg(kernel3, 1, sizeof(cl_mem), &output);
+	  err = clEnqueueNDRangeKernel(commands, kernel3, 1, NULL, &global, &local, 0, NULL, NULL);
+	  curchan/=8;
+	}
+	else if (curchan>2) {
+	  //printf("doing 2pass\n");
+	  global=nchan/4*local;
+	  clSetKernelArg(kernel2, 4, sizeof(unsigned int), &curchan);
+	  clSetKernelArg(kernel2, 0, sizeof(cl_mem), &input);
+	  clSetKernelArg(kernel2, 1, sizeof(cl_mem), &output);
+	  err = clEnqueueNDRangeKernel(commands, kernel2, 1, NULL, &global, &local, 0, NULL, NULL);
+	  curchan/=4;
+	}
+	else {
+	  //printf("doing 1pass\n");
+	  global=nchan/2*local;
+	  clSetKernelArg(kernel1, 4, sizeof(unsigned int), &curchan);
+	  clSetKernelArg(kernel1, 0, sizeof(cl_mem), &input);
+	  clSetKernelArg(kernel1, 1, sizeof(cl_mem), &output);
+	  err = clEnqueueNDRangeKernel(commands, kernel2, 1, NULL, &global, &local, 0, NULL, NULL);
+	  curchan/=2;	
+	}
+	cl_mem tmp=input;
+	input=output;
+	output=tmp;
+	
+      }
     }
     
     clFinish(commands);
@@ -414,18 +425,28 @@ int main(int argc, char** argv)
 
 #if 1
     FILE *outfile=fopen("test_out_2pass.dat","w");
-    fwrite(&ndata,1,sizeof(int),outfile);
-    fwrite(&nchan,1,sizeof(int),outfile);
-    
-    fwrite(mat2[0],ndata*nchan,sizeof(float),outfile);
-    fclose(outfile);
+    if (!outfile) {
+      fprintf(stderr,"Error opening output file for writing.\n");
+    }
+    else {
+      fwrite(&ndata,1,sizeof(int),outfile);
+      fwrite(&nchan,1,sizeof(int),outfile);
+      
+      fwrite(mat2[0],ndata*nchan,sizeof(float),outfile);
+      fclose(outfile);
+    }
+
 
     outfile=fopen("test_in_2pass.dat","w");
-    fwrite(&ndata,1,sizeof(int),outfile);
-    fwrite(&nchan,1,sizeof(int),outfile);
-    
-    fwrite(mat[0],ndata*nchan,sizeof(float),outfile);
-    fclose(outfile);
+    if (!outfile)
+      fprintf(stderr,"Error opening input file for writing.\n");
+    else {
+      fwrite(&ndata,1,sizeof(int),outfile);
+      fwrite(&nchan,1,sizeof(int),outfile);
+      
+      fwrite(mat[0],ndata*nchan,sizeof(float),outfile);
+      fclose(outfile);
+    }
 #endif
 
     

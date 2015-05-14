@@ -3,7 +3,7 @@
 #include "/home/sievers/frb/opencl/opencl_frb.h"
 
 //#define THREADS_PER_BLOCK 128
-#pragma OPENCL EXTENSION cl_amd_printf : enable
+//#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 __kernel void dedisperse_1pass(__global float *a, __global float *b, int nchan, int ndata, int cursize)
 {
@@ -18,7 +18,7 @@ __kernel void dedisperse_1pass(__global float *a, __global float *b, int nchan, 
   int threadIdx=get_local_id(0);
 
 
-  printf("my indices are %d %d %d\n",threadIdx,blockDim,blockIdx);
+  //printf("my indices are %d %d %d\n",threadIdx,blockDim,blockIdx);
 
   int curchunk=(2*blockIdx)/cursize;
   int my_local_ind=blockIdx-(curchunk*cursize/2);
@@ -56,6 +56,189 @@ __kernel void dedisperse_1pass(__global float *a, __global float *b, int nchan, 
 
 /*--------------------------------------------------------------------------------*/
 __kernel  void dedisperse_kernel_3pass(__global float *a, __global float *b, int nchan, int ndata, int cursize)
+{
+
+  __local float s1[2*THREADS_PER_BLOCK];
+  __local float s2[2*THREADS_PER_BLOCK];
+  __local float s3[2*THREADS_PER_BLOCK];
+  __local float s4[2*THREADS_PER_BLOCK];
+  __local float s5[2*THREADS_PER_BLOCK];
+  __local float s6[2*THREADS_PER_BLOCK];
+  __local float s7[2*THREADS_PER_BLOCK];
+  __local float s8[2*THREADS_PER_BLOCK];
+
+  //__shared__ float tmp[4][THREADS_PER_BLOCK];
+
+
+
+  int blockDim=get_local_size(0);
+  int nchunk=ndata/blockDim;
+
+  int blockIdx=get_group_id(0);
+  int threadIdx=get_local_id(0);
+
+
+  
+  int curchunk=(8*blockIdx)/cursize;
+
+
+  int my_local_ind=blockIdx-(curchunk*cursize/8);
+
+  //printf("my indices are %d %d %d %d %d\n",threadIdx,blockDim,blockIdx,my_local_ind,curchunk);
+
+  int in1=cursize*curchunk+8*my_local_ind;
+
+
+
+  //int out1=cursize*curchunk+my_local_ind;
+  //int out2=cursize*curchunk+my_local_ind+(1*cursize)/8;
+  //int out3=cursize*curchunk+my_local_ind+(2*cursize)/8;
+  //int out4=cursize*curchunk+my_local_ind+(3*cursize)/8;
+  //int out5=cursize*curchunk+my_local_ind+(4*cursize)/8;
+  //int out6=cursize*curchunk+my_local_ind+(5*cursize)/8;
+  //int out7=cursize*curchunk+my_local_ind+(6*cursize)/8;
+  //int out8=cursize*curchunk+my_local_ind+(7*cursize)/8;
+  int out1=cursize*curchunk+my_local_ind;
+  cursize/=8;
+
+
+  if (threadIdx==0) {
+    //printf("out on %d are %d %d %d %d %d %d %d %d\n",blockIdx,out1,out2,out3,out4,out5,out6,out7,out8);
+  }
+
+  
+
+
+  s1[threadIdx]=a[threadIdx+ndata*(in1)];
+  s2[threadIdx]=a[threadIdx+ndata*(in1+1)];
+  s3[threadIdx]=a[threadIdx+ndata*(in1+2)];
+  s4[threadIdx]=a[threadIdx+ndata*(in1+3)];
+  s5[threadIdx]=a[threadIdx+ndata*(in1+4)];
+  s6[threadIdx]=a[threadIdx+ndata*(in1+5)];
+  s7[threadIdx]=a[threadIdx+ndata*(in1+6)];
+  s8[threadIdx]=a[threadIdx+ndata*(in1+7)];
+ 
+  for (int i=1;i<nchunk;i++) {
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    s1[threadIdx+blockDim]=a[threadIdx+ndata*(in1)+i*blockDim];
+    s2[threadIdx+blockDim]=a[threadIdx+ndata*(in1+1)+i*blockDim];
+    s3[threadIdx+blockDim]=a[threadIdx+ndata*(in1+2)+i*blockDim];
+    s4[threadIdx+blockDim]=a[threadIdx+ndata*(in1+3)+i*blockDim];
+    s5[threadIdx+blockDim]=a[threadIdx+ndata*(in1+4)+i*blockDim];
+    s6[threadIdx+blockDim]=a[threadIdx+ndata*(in1+5)+i*blockDim];
+    s7[threadIdx+blockDim]=a[threadIdx+ndata*(in1+6)+i*blockDim];
+    s8[threadIdx+blockDim]=a[threadIdx+ndata*(in1+7)+i*blockDim];
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+    float tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx]+s4[threadIdx]
+      +s5[threadIdx]+s6[threadIdx]+s7[threadIdx]+s8[threadIdx];
+    b[threadIdx+ndata*out1+(i-1)*blockDim]=tmp;
+
+    tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx]+s4[threadIdx]
+      +s5[threadIdx+1]+s6[threadIdx+1]+s7[threadIdx+1]+s8[threadIdx+1];
+    int ii=threadIdx+ndata*(out1+cursize)+(i-1)*blockDim-my_local_ind;
+    if (ii>=0)
+      b[ii]=tmp;
+
+    tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx+1]+s4[threadIdx+1]
+      +s5[threadIdx+1]+s6[threadIdx+1]+s7[threadIdx+2]+s8[threadIdx+2];
+    ii=threadIdx+ndata*(out1+2*cursize)+(i-1)*blockDim-2*my_local_ind;    
+    if (ii>0)
+      b[ii]=tmp;
+    
+    tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx+1]+s4[threadIdx+1]
+      +s5[threadIdx+2]+s6[threadIdx+2]+s7[threadIdx+3]+s8[threadIdx+3];
+    ii=threadIdx+ndata*(out1+3*cursize)+(i-1)*blockDim-3*my_local_ind;    
+    if (ii>0)
+      b[ii]=tmp;
+
+    tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+1]+s4[threadIdx+2]
+      +s5[threadIdx+2]+s6[threadIdx+3]+s7[threadIdx+3]+s8[threadIdx+4];
+    ii=threadIdx+ndata*(out1+4*cursize)+(i-1)*blockDim-4*my_local_ind;    
+    if (ii>0)
+      b[ii]=tmp;
+
+    tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+1]+s4[threadIdx+2]
+      +s5[threadIdx+3]+s6[threadIdx+4]+s7[threadIdx+4]+s8[threadIdx+5];
+    ii=threadIdx+ndata*(out1+5*cursize)+(i-1)*blockDim-5*my_local_ind;    
+    if (ii>0)
+      b[ii]=tmp;
+    
+    tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+2]+s4[threadIdx+3]
+      +s5[threadIdx+3]+s6[threadIdx+4]+s7[threadIdx+5]+s8[threadIdx+6];
+    ii=threadIdx+ndata*(out1+6*cursize)+(i-1)*blockDim-6*my_local_ind;    
+    if (ii>0)
+      b[ii]=tmp;
+
+    tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+2]+s4[threadIdx+3]
+      +s5[threadIdx+4]+s6[threadIdx+5]+s7[threadIdx+6]+s8[threadIdx+7];
+    ii=threadIdx+ndata*(out1+7*cursize)+(i-1)*blockDim-7*my_local_ind;    
+    if (ii>0)
+      b[ii]=tmp;
+
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+    s1[threadIdx]=s1[threadIdx+blockDim];
+    s2[threadIdx]=s2[threadIdx+blockDim];
+    s3[threadIdx]=s3[threadIdx+blockDim];
+    s4[threadIdx]=s4[threadIdx+blockDim];       
+    s5[threadIdx]=s5[threadIdx+blockDim];       
+    s6[threadIdx]=s6[threadIdx+blockDim];       
+    s7[threadIdx]=s7[threadIdx+blockDim];       
+    s8[threadIdx]=s8[threadIdx+blockDim];       
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  
+
+
+
+
+  float tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx]+s4[threadIdx]
+    +s5[threadIdx]+s6[threadIdx]+s7[threadIdx]+s8[threadIdx];
+  b[threadIdx+ndata*out1+(nchunk-1)*blockDim]=tmp;
+
+  tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx]+s4[threadIdx]
+    +s5[threadIdx+1]+s6[threadIdx+1]+s7[threadIdx+1]+s8[threadIdx+1];
+  if (threadIdx<blockDim-1)
+    b[threadIdx+ndata*(out1+cursize)+(nchunk-1)*blockDim-my_local_ind]=tmp;
+
+  tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx+1]+s4[threadIdx+1]
+    +s5[threadIdx+1]+s6[threadIdx+1]+s7[threadIdx+2]+s8[threadIdx+2];
+  if (threadIdx<blockDim-2)
+    b[threadIdx+ndata*(out1+2*cursize)+(nchunk-1)*blockDim-2*my_local_ind]=tmp;
+  
+  tmp=s1[threadIdx]+s2[threadIdx]+s3[threadIdx+1]+s4[threadIdx+1]
+    +s5[threadIdx+2]+s6[threadIdx+2]+s7[threadIdx+3]+s8[threadIdx+3];
+  if (threadIdx<blockDim-3)
+    b[threadIdx+ndata*(out1+3*cursize)+(nchunk-1)*blockDim-3*my_local_ind]=tmp;
+
+  tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+1]+s4[threadIdx+2]
+    +s5[threadIdx+2]+s6[threadIdx+3]+s7[threadIdx+3]+s8[threadIdx+4];
+  if (threadIdx<blockDim-4)
+    b[threadIdx+ndata*(out1+4*cursize)+(nchunk-1)*blockDim-4*my_local_ind]=tmp;
+
+  tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+1]+s4[threadIdx+2]
+    +s5[threadIdx+3]+s6[threadIdx+4]+s7[threadIdx+4]+s8[threadIdx+5];
+  if (threadIdx<blockDim-5)
+    b[threadIdx+ndata*(out1+5*cursize)+(nchunk-1)*blockDim-5*my_local_ind]=tmp;
+
+  tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+2]+s4[threadIdx+3]
+    +s5[threadIdx+3]+s6[threadIdx+4]+s7[threadIdx+5]+s8[threadIdx+6];
+  if (threadIdx<blockDim-6)
+    b[threadIdx+ndata*(out1+6*cursize)+(nchunk-1)*blockDim-6*my_local_ind]=tmp;
+
+  tmp=s1[threadIdx]+s2[threadIdx+1]+s3[threadIdx+2]+s4[threadIdx+3]
+    +s5[threadIdx+4]+s6[threadIdx+5]+s7[threadIdx+6]+s8[threadIdx+7];
+  if (threadIdx<blockDim-7)
+    b[threadIdx+ndata*(out1+7*cursize)+(nchunk-1)*blockDim-7*my_local_ind]=tmp;
+  barrier(CLK_LOCAL_MEM_FENCE);
+}
+
+/*--------------------------------------------------------------------------------*/
+/*--------------------------------------------------------------------------------*/
+__kernel  void dedisperse_kernel_3pass_org(__global float *a, __global float *b, int nchan, int ndata, int cursize)
 {
 
   __local float s1[2*THREADS_PER_BLOCK];
@@ -238,7 +421,7 @@ __kernel  void dedisperse_kernel_3pass(__global float *a, __global float *b, int
 
 
 /*--------------------------------------------------------------------------------*/
-__kernel void dedisperse_kernel_2pass(__global const float *a, __global float *b, int nchan, int ndata, int cursize)
+__kernel void dedisperse_kernel_2pass(__global float *a, __global float *b, int nchan, int ndata, int cursize)
 {
 
   __local float s1[2*THREADS_PER_BLOCK];
